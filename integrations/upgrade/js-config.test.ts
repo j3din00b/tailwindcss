@@ -1,5 +1,5 @@
 import { expect } from 'vitest'
-import { css, json, test, ts } from '../utils'
+import { css, html, json, test, ts } from '../utils'
 
 test(
   `upgrade JS config files with flat theme values, darkMode, and content fields`,
@@ -18,7 +18,7 @@ test(
 
         module.exports = {
           darkMode: 'selector',
-          content: ['./src/**/*.{html,js}', './my-app/**/*.{html,js}'],
+          content: ['./src/**/*.{html,js}', './node_modules/my-external-lib/**/*.{html}'],
           theme: {
             boxShadow: {
               sm: '0 2px 6px rgb(15 23 42 / 0.08)',
@@ -72,6 +72,11 @@ test(
         @tailwind components;
         @tailwind utilities;
       `,
+      'node_modules/my-external-lib/src/template.html': html`
+        <div class="text-red-500">
+          Hello world!
+        </div>
+      `,
     },
   },
   async ({ exec, fs }) => {
@@ -82,8 +87,7 @@ test(
       --- src/input.css ---
       @import 'tailwindcss';
 
-      @source './**/*.{html,js}';
-      @source '../my-app/**/*.{html,js}';
+      @source '../node_modules/my-external-lib/**/*.{html}';
 
       @variant dark (&:where(.dark, .dark *));
 
@@ -106,7 +110,7 @@ test(
 
         --font-family-sans: Inter, system-ui, sans-serif;
         --font-family-display: Cabinet Grotesk, ui-sans-serif, system-ui, sans-serif,
-          "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+          'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
 
         --radius-4xl: 2rem;
 
@@ -155,14 +159,33 @@ test(
         import customPlugin from './custom-plugin'
 
         export default {
-          plugins: [typography, customPlugin],
+          plugins: [
+            typography,
+            customPlugin({
+              'is-null': null,
+              'is-true': true,
+              'is-false': false,
+              'is-int': 1234567,
+              'is-float': 1.35,
+              'is-sci': 1.35e-5,
+              'is-str-null': 'null',
+              'is-str-true': 'true',
+              'is-str-false': 'false',
+              'is-str-int': '1234567',
+              'is-str-float': '1.35',
+              'is-str-sci': '1.35e-5',
+              'is-arr': ['foo', 'bar'],
+              'is-arr-mixed': [null, true, false, 1234567, 1.35, 'foo', 'bar', 'true'],
+            }),
+          ],
         } satisfies Config
       `,
       'custom-plugin.js': ts`
-        export default function ({ addVariant }) {
+        import plugin from 'tailwindcss/plugin'
+        export default plugin.withOptions((_options) => ({ addVariant }) => {
           addVariant('inverted', '@media (inverted-colors: inverted)')
           addVariant('hocus', ['&:focus', '&:hover'])
-        }
+        })
       `,
       'src/input.css': css`
         @tailwind base;
@@ -180,7 +203,22 @@ test(
       @import 'tailwindcss';
 
       @plugin '@tailwindcss/typography';
-      @plugin '../custom-plugin';
+      @plugin '../custom-plugin' {
+        is-null: null;
+        is-true: true;
+        is-false: false;
+        is-int: 1234567;
+        is-float: 1.35;
+        is-sci: 0.0000135;
+        is-str-null: 'null';
+        is-str-true: 'true';
+        is-str-false: 'false';
+        is-str-int: '1234567';
+        is-str-float: '1.35';
+        is-str-sci: '1.35e-5';
+        is-arr: 'foo', 'bar';
+        is-arr-mixed: null, true, false, 1234567, 1.35, 'foo', 'bar', 'true';
+      }
       "
     `)
 
@@ -193,7 +231,7 @@ test(
 )
 
 test(
-  'does not upgrade JS config files with functions in the theme config',
+  'upgrades JS config files with functions in the theme config',
   {
     fs: {
       'package.json': json`
@@ -230,24 +268,26 @@ test(
       "
       --- src/input.css ---
       @import 'tailwindcss';
-      @config '../tailwind.config.ts';
+
+      @theme {
+        --color-gray-50: oklch(0.985 0 none);
+        --color-gray-100: oklch(0.97 0 none);
+        --color-gray-200: oklch(0.922 0 none);
+        --color-gray-300: oklch(0.87 0 none);
+        --color-gray-400: oklch(0.708 0 none);
+        --color-gray-500: oklch(0.556 0 none);
+        --color-gray-600: oklch(0.439 0 none);
+        --color-gray-700: oklch(0.371 0 none);
+        --color-gray-800: oklch(0.269 0 none);
+        --color-gray-900: oklch(0.205 0 none);
+        --color-gray-950: oklch(0.145 0 none);
+      }
       "
     `)
 
     expect(await fs.dumpFiles('tailwind.config.ts')).toMatchInlineSnapshot(`
       "
-      --- tailwind.config.ts ---
-      import { type Config } from 'tailwindcss'
 
-      export default {
-        theme: {
-          extend: {
-            colors: ({ colors }) => ({
-              gray: colors.neutral,
-            }),
-          },
-        },
-      } satisfies Config
       "
     `)
   },
@@ -364,6 +404,65 @@ test(
 
       export default {
         plugins: [function complexConfig() {}],
+      } satisfies Config
+      "
+    `)
+  },
+)
+
+test(
+  `does not upgrade JS config files with non-simple screens object`,
+  {
+    fs: {
+      'package.json': json`
+        {
+          "dependencies": {
+            "@tailwindcss/upgrade": "workspace:^"
+          }
+        }
+      `,
+      'tailwind.config.ts': ts`
+        import { type Config } from 'tailwindcss'
+
+        export default {
+          theme: {
+            screens: {
+              xl: { min: '1024px', max: '1279px' },
+              tall: { raw: '(min-height: 800px)' },
+            },
+          },
+        } satisfies Config
+      `,
+      'src/input.css': css`
+        @tailwind base;
+        @tailwind components;
+        @tailwind utilities;
+      `,
+    },
+  },
+  async ({ exec, fs }) => {
+    await exec('npx @tailwindcss/upgrade')
+
+    expect(await fs.dumpFiles('src/**/*.css')).toMatchInlineSnapshot(`
+      "
+      --- src/input.css ---
+      @import 'tailwindcss';
+      @config '../tailwind.config.ts';
+      "
+    `)
+
+    expect(await fs.dumpFiles('tailwind.config.ts')).toMatchInlineSnapshot(`
+      "
+      --- tailwind.config.ts ---
+      import { type Config } from 'tailwindcss'
+
+      export default {
+        theme: {
+          screens: {
+            xl: { min: '1024px', max: '1279px' },
+            tall: { raw: '(min-height: 800px)' },
+          },
+        },
       } satisfies Config
       "
     `)

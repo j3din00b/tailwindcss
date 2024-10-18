@@ -148,6 +148,20 @@ describe('arbitrary properties', () => {
 })
 
 describe('@apply', () => {
+  it('@apply in @keyframes is not allowed', () => {
+    return expect(() =>
+      compileCss(css`
+        @keyframes foo {
+          0% {
+            @apply bg-red-500;
+          }
+        }
+      `),
+    ).rejects.toThrowErrorMatchingInlineSnapshot(
+      `[Error: You cannot use \`@apply\` inside \`@keyframes\`.]`,
+    )
+  })
+
   it('should replace @apply with the correct result', async () => {
     expect(
       await compileCss(css`
@@ -997,10 +1011,20 @@ describe('Parsing themes values from CSS', () => {
             --color-blue: #00f;
             --font-size-sm: 13px;
             --font-size-md: 16px;
+
+            --animate-spin: spin 1s infinite linear;
+
+            @keyframes spin {
+              to {
+                transform: rotate(360deg);
+              }
+            }
           }
           @theme {
             --color-*: initial;
             --font-size-md: initial;
+            --animate-*: initial;
+            --keyframes-*: initial;
           }
           @theme {
             --color-green: #0f0;
