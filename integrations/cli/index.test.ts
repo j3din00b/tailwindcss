@@ -96,6 +96,149 @@ describe.each([
   )
 
   test(
+    'production build — read input from stdin',
+    {
+      fs: {
+        'package.json': json`{}`,
+        'pnpm-workspace.yaml': yaml`
+          #
+          packages:
+            - project-a
+        `,
+        'project-a/package.json': json`
+          {
+            "dependencies": {
+              "tailwindcss": "workspace:^",
+              "@tailwindcss/cli": "workspace:^"
+            }
+          }
+        `,
+        'project-a/index.html': html`
+          <div
+            class="underline 2xl:font-bold hocus:underline inverted:flex *:flex **:flex"
+          ></div>
+        `,
+        'project-a/plugin.js': js`
+          module.exports = function ({ addVariant }) {
+            addVariant('inverted', '@media (inverted-colors: inverted)')
+            addVariant('hocus', ['&:focus', '&:hover'])
+          }
+        `,
+        'project-a/tailwind.config.js': js`
+          module.exports = {
+            content: ['../project-b/src/**/*.js'],
+          }
+        `,
+        'project-a/src/index.js': js`
+          const className = "content-['project-a/src/index.js']"
+          module.exports = { className }
+        `,
+        'project-b/src/index.html': html`
+          <div class="flex" />
+        `,
+        'project-b/src/index.js': js`
+          const className = "content-['project-b/src/index.js']"
+          module.exports = { className }
+        `,
+      },
+    },
+    async ({ root, fs, exec }) => {
+      await exec(
+        `${command} --input - --output dist/out.css`,
+        { cwd: path.join(root, 'project-a') },
+        {
+          stdin: css`
+            @import 'tailwindcss/utilities';
+            @config './tailwind.config.js';
+            @source '../project-b/src/**/*.html';
+            @plugin './plugin.js';
+          `,
+        },
+      )
+
+      await fs.expectFileToContain('project-a/dist/out.css', [
+        candidate`underline`,
+        candidate`flex`,
+        candidate`content-['project-a/src/index.js']`,
+        candidate`content-['project-b/src/index.js']`,
+        candidate`inverted:flex`,
+        candidate`hocus:underline`,
+        candidate`*:flex`,
+        candidate`**:flex`,
+      ])
+    },
+  )
+
+  test(
+    'production build — (write to stdout)',
+    {
+      fs: {
+        'package.json': json`{}`,
+        'pnpm-workspace.yaml': yaml`
+          #
+          packages:
+            - project-a
+        `,
+        'project-a/package.json': json`
+          {
+            "dependencies": {
+              "tailwindcss": "workspace:^",
+              "@tailwindcss/cli": "workspace:^"
+            }
+          }
+        `,
+        'project-a/index.html': html`
+          <div
+            class="underline 2xl:font-bold hocus:underline inverted:flex *:flex **:flex"
+          ></div>
+        `,
+        'project-a/plugin.js': js`
+          module.exports = function ({ addVariant }) {
+            addVariant('inverted', '@media (inverted-colors: inverted)')
+            addVariant('hocus', ['&:focus', '&:hover'])
+          }
+        `,
+        'project-a/tailwind.config.js': js`
+          module.exports = {
+            content: ['../project-b/src/**/*.js'],
+          }
+        `,
+        'project-a/src/index.css': css`
+          @import 'tailwindcss/utilities';
+          @config '../tailwind.config.js';
+          @source '../../project-b/src/**/*.html';
+          @plugin '../plugin.js';
+        `,
+        'project-a/src/index.js': js`
+          const className = "content-['project-a/src/index.js']"
+          module.exports = { className }
+        `,
+        'project-b/src/index.html': html`
+          <div class="flex" />
+        `,
+        'project-b/src/index.js': js`
+          const className = "content-['project-b/src/index.js']"
+          module.exports = { className }
+        `,
+      },
+    },
+    async ({ root, expect, exec }) => {
+      let stdout = await exec(`${command} --input src/index.css --output -`, {
+        cwd: path.join(root, 'project-a'),
+      })
+
+      expect(stdout).toContain(candidate`underline`)
+      expect(stdout).toContain(candidate`flex`)
+      expect(stdout).toContain(candidate`content-['project-a/src/index.js']`)
+      expect(stdout).toContain(candidate`content-['project-b/src/index.js']`)
+      expect(stdout).toContain(candidate`inverted:flex`)
+      expect(stdout).toContain(candidate`hocus:underline`)
+      expect(stdout).toContain(candidate`*:flex`)
+      expect(stdout).toContain(candidate`**:flex`)
+    },
+  )
+
+  test(
     'watch mode',
     {
       fs: {
@@ -413,6 +556,83 @@ describe.each([
       ])
     },
   )
+
+  test(
+    'git ignore files outside of a repo are not considered',
+    {
+      fs: {
+        // Ignore everything in the "home" directory
+        'home/.gitignore': '*',
+
+        // Only ignore files called ignore-*.html in the actual git repo
+        'home/project/.gitignore': 'ignore-*.html',
+
+        'home/project/package.json': json`
+          {
+            "type": "module",
+            "dependencies": {
+              "tailwindcss": "workspace:^",
+              "@tailwindcss/cli": "workspace:^"
+            }
+          }
+        `,
+
+        'home/project/src/index.css': css` @import 'tailwindcss'; `,
+        'home/project/src/index.html': html`
+          <div
+            class="content-['index.html']"
+          ></div>
+        `,
+        'home/project/src/ignore-1.html': html`
+          <div
+            class="content-['ignore-1.html']"
+          ></div>
+        `,
+        'home/project/src/ignore-2.html': html`
+          <div
+            class="content-['ignore-2.html']"
+          ></div>
+        `,
+      },
+
+      installDependencies: false,
+    },
+    async ({ fs, root, exec }) => {
+      await exec(`pnpm install --ignore-workspace`, {
+        cwd: path.join(root, 'home/project'),
+      })
+
+      // No git repo = all ignore files are considered
+      await exec(`${command} --input src/index.css --output dist/out.css`, {
+        cwd: path.join(root, 'home/project'),
+      })
+
+      await fs.expectFileNotToContain('./home/project/dist/out.css', [
+        candidate`content-['index.html']`,
+        candidate`content-['ignore-1.html']`,
+        candidate`content-['ignore-2.html']`,
+      ])
+
+      // Make home/project a git repo
+      // Only ignore files within the repo are considered
+      await exec(`git init`, {
+        cwd: path.join(root, 'home/project'),
+      })
+
+      await exec(`${command} --input src/index.css --output dist/out.css`, {
+        cwd: path.join(root, 'home/project'),
+      })
+
+      await fs.expectFileToContain('./home/project/dist/out.css', [
+        candidate`content-['index.html']`,
+      ])
+
+      await fs.expectFileNotToContain('./home/project/dist/out.css', [
+        candidate`content-['ignore-1.html']`,
+        candidate`content-['ignore-2.html']`,
+      ])
+    },
+  )
 })
 
 test(
@@ -529,13 +749,6 @@ test(
       .content-\\[\\"src\\/nested\\/index\\.html\\"\\] {
         --tw-content: "src/nested/index.html";
         content: var(--tw-content);
-      }
-      @supports (-moz-orient: inline) {
-        @layer base {
-          *, ::before, ::after, ::backdrop {
-            --tw-content: "";
-          }
-        }
       }
       @property --tw-content {
         syntax: "*";
@@ -775,13 +988,6 @@ test(
         --tw-content: 'project-e/nested/index.html';
         content: var(--tw-content);
       }
-      @supports (-moz-orient: inline) {
-        @layer base {
-          *, ::before, ::after, ::backdrop {
-            --tw-content: "";
-          }
-        }
-      }
       @property --tw-content {
         syntax: "*";
         inherits: false;
@@ -980,13 +1186,6 @@ test(
       .content-\\[\\"pages\\/nested\\/foo\\.html\\"\\] {
         --tw-content: "pages/nested/foo.html";
         content: var(--tw-content);
-      }
-      @supports (-moz-orient: inline) {
-        @layer base {
-          *, ::before, ::after, ::backdrop {
-            --tw-content: "";
-          }
-        }
       }
       @property --tw-content {
         syntax: "*";

@@ -18,6 +18,8 @@ import { DefaultMap } from './utils/default-map'
 import { isPositiveInteger } from './utils/infer-data-type'
 import { segment } from './utils/segment'
 
+export const IS_VALID_VARIANT_NAME = /^@?[a-zA-Z0-9_-]*$/
+
 type VariantFn<T extends Variant['kind']> = (
   rule: Rule,
   variant: Extract<Variant, { kind: T }>,
@@ -679,7 +681,7 @@ export function createVariants(theme: Theme): Variants {
   // State
   staticVariant('visited', ['&:visited'])
   staticVariant('target', ['&:target'])
-  staticVariant('open', ['&:is([open], :popover-open)'])
+  staticVariant('open', ['&:is([open], :popover-open, :open)'])
 
   // Forms
   staticVariant('default', ['&:default'])
@@ -1113,6 +1115,11 @@ export function createVariants(theme: Theme): Variants {
 
       variants.suggest(
         '@min',
+        () => Array.from(widths.keys()).filter((key) => key !== null) as string[],
+      )
+
+      variants.suggest(
+        '@',
         () => Array.from(widths.keys()).filter((key) => key !== null) as string[],
       )
     }

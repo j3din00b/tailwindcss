@@ -438,6 +438,9 @@ export function* parseCandidate(input: string, designSystem: DesignSystem): Iter
       let valueIsArbitrary = startArbitraryIdx !== -1
 
       if (valueIsArbitrary) {
+        // Arbitrary values must end with a `]`.
+        if (value[value.length - 1] !== ']') return
+
         let arbitraryValue = decodeArbitraryValue(value.slice(startArbitraryIdx + 1, -1))
 
         // Extract an explicit typehint if present, e.g. `bg-[color:var(--my-var)])`
@@ -513,6 +516,9 @@ function parseModifier(modifier: string): CandidateModifier | null {
     // Empty arbitrary values are invalid. E.g.: `data-():`
     //                                                 ^^
     if (arbitraryValue.length === 0 || arbitraryValue.trim().length === 0) return null
+
+    // Arbitrary values must start with `--` since it represents a CSS variable.
+    if (arbitraryValue[0] !== '-' && arbitraryValue[1] !== '-') return null
 
     return {
       kind: 'arbitrary',
@@ -617,7 +623,10 @@ export function parseVariant(variant: string, designSystem: DesignSystem): Varia
             }
           }
 
-          if (value[0] === '[' && value[value.length - 1] === ']') {
+          if (value[value.length - 1] === ']') {
+            // Discard values like `foo-[#bar]`
+            if (value[0] !== '[') continue
+
             let arbitraryValue = decodeArbitraryValue(value.slice(1, -1))
 
             // Empty arbitrary values are invalid. E.g.: `data-[]:`
@@ -635,12 +644,18 @@ export function parseVariant(variant: string, designSystem: DesignSystem): Varia
             }
           }
 
-          if (value[0] === '(' && value[value.length - 1] === ')') {
+          if (value[value.length - 1] === ')') {
+            // Discard values like `foo-(--bar)`
+            if (value[0] !== '(') continue
+
             let arbitraryValue = decodeArbitraryValue(value.slice(1, -1))
 
             // Empty arbitrary values are invalid. E.g.: `data-():`
             //                                                 ^^
             if (arbitraryValue.length === 0 || arbitraryValue.trim().length === 0) return null
+
+            // Arbitrary values must start with `--` since it represents a CSS variable.
+            if (arbitraryValue[0] !== '-' && arbitraryValue[1] !== '-') return null
 
             return {
               kind: 'functional',
